@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "levels": [
+    {
+      "id": "ex5_level1",
+      "name": "Example 5 Level",
+
+      "tiles": {
+        "tileW": 24,
+        "tileH": 24,
+        "frameW": 32,
+        "frameH": 32
+      },
+
+      "tilemap": [
+        "                    g   g   b  x        ",
+        "                b x         LggR        ",
+        "      x   f     LggR                    ",
+        "     LR   LgR          LR               ",
+        "   fx  b        x   b                   ",
+        "   LgggR   x   LR   LgR x   b  xf       ",
+        "         LgR  b x       g   LggggR      ",
+        " fx           LgR                    fx ",
+        " LgR      b                         LggR",
+        "         LgR        f x    LR  LgR  [dd]",
+        "   x     [d]      x LggR   x    ff  [dd]",
+        "LgggRffLggggggRfffLgggg]fffgfLgggggggggg",
+        "dddddddddddddddddddddddddddddddddddddddd"
+      ],
+
+      "rules": {},
+
+      "winScore": 15,
+      "gravity": 10,
+      "fallResetMarginTiles": 3,
+
+      "playerStart": { "x": 32, "y": 216 },
+
+      "view": {
+        "w": 240,
+        "h": 192,
+        "background": [69, 61, 79],
+        "cameraLerp": 0.1,
+
+        "parallax": [
+          { "img": "assets/background_layer_1.png", "speed": 0.2 },
+          { "img": "assets/background_layer_2.png", "speed": 0.4 },
+          { "img": "assets/background_layer_3.png", "speed": 0.6 }
+        ]
+      },
+
+      "overrides": {
+        "hud": {
+          "rescueLabel": "RESCUED",
+          "winScoreLabel": "RESCUED %d/%d"
+        }
+      }
+    }
+  ]
+}
