@@ -28,7 +28,6 @@ export class DebugOverlay {
   }
 
   log(evt) {
-    // evt is { name, payload } from EventBus wildcard
     if (!evt) return;
     const msg = `${evt.name}`;
     this.lines.unshift(msg);
@@ -43,7 +42,7 @@ export class DebugOverlay {
     push();
     noStroke();
     fill(0, 160);
-    rect(6, 6, 228, 86, 6);
+    rect(6, 6, 300, 160, 6);
     pop();
 
     fill(255);
@@ -52,17 +51,26 @@ export class DebugOverlay {
     const lvl = game?.level || null;
     const score = lvl?.score ?? 0;
 
-    const playerCtrl = lvl?.playerCtrl || null;
-    const hp = playerCtrl?.health ?? "?";
-    const maxHp = playerCtrl?.maxHealth ?? "?";
-    const dead = playerCtrl?.dead ?? false;
+    const player = lvl?.player ?? lvl?.playerCtrl?.player ?? null;
+    const hp = player?.health ?? "?";
+    const maxHp = player?.maxHealth ?? "?";
+    const dead = player?.dead ?? false;
     const won = lvl?.won ?? false;
 
-    text(`Score: ${score}`, 12, 22);
-    text(`Health: ${hp}/${maxHp}`, 12, 34);
-    text(`Won: ${won}  Dead: ${dead}`, 12, 46);
+    const moonGravity = lvl?.debugFlags?.moonGravity ?? false;
+    const invincible = lvl?.debugFlags?.invincible ?? false;
+    const gravityValue = world?.gravity?.y ?? "?";
 
-    let y = 62;
+    text(`DEBUG MENU (T to close)`, 12, 20);
+    text(`1 = Moon Gravity: ${moonGravity ? "ON" : "OFF"}`, 12, 34);
+    text(`2 = Invincible: ${invincible ? "ON" : "OFF"}`, 12, 46);
+
+    text(`Score: ${score}`, 12, 62);
+    text(`Health: ${hp}/${maxHp}`, 12, 74);
+    text(`Won: ${won}  Dead: ${dead}`, 12, 86);
+    text(`Gravity Y: ${gravityValue}`, 12, 98);
+
+    let y = 114;
     for (const line of this.lines) {
       text(line, 12, y);
       y += 10;

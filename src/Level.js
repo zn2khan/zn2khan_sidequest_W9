@@ -39,18 +39,13 @@ export class Level {
     this.levelData = pkg.level;
     this.tuning = pkg.tuning || {};
     this.worldCfg = pkg.world || {};
-    this.tilesCfg = pkg.tiles || {}; // may be empty; tiles are also in levelData.tiles in levels.json
+    this.tilesCfg = pkg.tiles || {};
     this.bounds = pkg.bounds || {};
 
-    // world runtime state
     this.score = 0;
     this.won = false;
-
-    // world time (ms since level start; WORLD-owned)
-    // IMPORTANT: we STOP this timer on win OR death.
     this.elapsedMs = 0;
 
-    // groups (created in TileBuilder / BoarSystem)
     this.ground = null;
     this.groundDeep = null;
     this.platformsL = null;
@@ -62,35 +57,35 @@ export class Level {
     this.leaf = null;
     this.fire = null;
 
-    // player entity + controller
     this.player = null;
     this.playerCtrl = null;
 
-    // restart bookkeeping
     this.leafSpawns = [];
     this.boarSpawns = [];
 
-    // cached HUD state
     this._lastScore = null;
     this._lastHealth = null;
     this._lastMaxHealth = null;
 
-    // normalized world config
     this.WIN_SCORE = Number(this.worldCfg.winScore ?? this.levelData?.winScore ?? 15);
     this.GRAVITY = Number(this.worldCfg.gravity ?? this.levelData?.gravity ?? 10);
     this.FALL_RESET_MARGIN_TILES = Number(
       this.worldCfg.fallResetMarginTiles ?? this.levelData?.fallResetMarginTiles ?? 3,
     );
 
-    // IMPORTANT:
-    // Interactions should be wired once per Level instance.
-    // If you wire them again on restart, p5play will stack callbacks and you’ll
-    // get double damage / double pickups / “weird” state.
+    // debug flags
+    this.debugFlags = {
+      moonGravity: false,
+      invincible: false,
+    };
+
+    this._defaultGravity = this.GRAVITY;
+    this._moonGravityValue = Math.max(1, this.GRAVITY * 0.35);
+
     this._playerInteractionsWired = false;
     this._boarFireWired = false;
-    this._boarGroupBoundForPlayer = null; // remembers which boar Group we bound collides() to
+    this._boarGroupBoundForPlayer = null;
 
-    // bind event listeners
     this._unsubs = [];
     this._installEventListeners();
   }
@@ -103,6 +98,42 @@ export class Level {
   destroy() {
     this._unsubs.forEach((u) => u());
     this._unsubs = [];
+  }
+
+  // -----------------------
+  // debug helpers
+  // -----------------------
+
+  _applyGravitySetting() {
+    world.gravity.y = this.debugFlags.moonGravity
+      ? this._moonGravityValue
+      : this._defaultGravity;
+  }
+
+  setMoonGravityEnabled(enabled) {
+    this.debugFlags.moonGravity = !!enabled;
+    this._applyGravitySetting();
+
+    this.events?.emit("debug:moonGravityToggled", {
+      enabled: this.debugFlags.moonGravity,
+      gravity: world.gravity.y,
+    });
+  }
+
+  toggleMoonGravity() {
+    this.setMoonGravityEnabled(!this.debugFlags.moonGravity);
+  }
+
+  setInvincibleEnabled(enabled) {
+    this.debugFlags.invincible = !!enabled;
+
+    this.events?.emit("debug:invincibleToggled", {
+      enabled: this.debugFlags.invincible,
+    });
+  }
+
+  toggleInvincible() {
+    this.setInvincibleEnabled(!this.debugFlags.invincible);
   }
 
   // -----------------------
@@ -126,33 +157,23 @@ export class Level {
   // -----------------------
 
   build() {
-    world.gravity.y = this.GRAVITY;
-
-    // Reset timer on build (new level instance or rebuild)
+    this._applyGravitySetting();
     this.elapsedMs = 0;
 
-    // 1) Build tile groups + spawn from tilemap.
-    // TileBuilder is responsible for creating:
-    // - static tile groups (ground/platforms/walls)
-    // - interactive groups (leaf/fire)
-    // - boar group + tile spawning ('b') via Tiles()
     buildTilesAndGroups(this);
 
-    // 2) Player entity + controller (WORLD)
     this.player = new PlayerEntity(this.pkg, this.assets);
     this.player.buildSprites();
     this.playerCtrl = new PlayerController(this.player, { events: this.events });
 
-    // 3) Cache spawns + wire interactions (ONE TIME) + hook boar collisions
     this._cacheLeafSpawns();
     cacheBoarSpawns(this);
 
-    this._wirePlayerInteractionsOnce(); // player<->leaf/fire
-    this._wireBoarFireRuleOnce(); // boar<->fire (wired once to boar group)
-    this._rebindPlayerBoarCollide(); // player<->boar (bind to current boar group)
+    this._wirePlayerInteractionsOnce();
+    this._wireBoarFireRuleOnce();
+    this._rebindPlayerBoarCollide();
     hookBoarSolids(this);
 
-    // 4) HUD
     this._lastScore = this._lastHealth = this._lastMaxHealth = null;
     maybeRedrawHUD(this);
 
@@ -162,20 +183,18 @@ export class Level {
   update({ input }) {
     const playerDead = this.player?.dead === true;
 
-    // 0) WORLD timer (STOP on terminal states)
-    // (Put this early so it counts time even if logic below early-outs later.)
+    this._applyGravitySetting();
+
     if (!this.won && !playerDead) {
       this.elapsedMs += deltaTime;
     }
 
-    // 1) AI (freeze boars if dead/won, matching monolith feel)
     if (!playerDead && !this.won) {
       updateBoars(this);
     } else if (this.boar) {
       for (const e of this.boar) e.vel.x = 0;
     }
 
-    // 2) Player consumes input snapshot
     this.playerCtrl.update({
       input,
       solids: this._solids(),
@@ -183,16 +202,12 @@ export class Level {
       won: this.won,
     });
 
-    // 3) Optional safety checks (remove later if desired)
     this._preStepPhysicsSanity();
 
-    // 4) Physics step
     world.step();
 
-    // 5) World rules
     this._fallResetIfNeeded();
 
-    // 6) HUD refresh (score/health only; timer not shown)
     maybeRedrawHUD(this);
   }
 
@@ -203,14 +218,12 @@ export class Level {
   restart() {
     this.won = false;
     this.score = 0;
-
-    // reset timer on restart
     this.elapsedMs = 0;
 
-    // reset player entity/controller state
+    this._applyGravitySetting();
+
     this.playerCtrl.reset();
 
-    // respawn leaves (overlap-only)
     for (const item of this.leafSpawns) {
       const s = item.s;
       s.x = item.x;
@@ -220,17 +233,13 @@ export class Level {
       s.removeColliders();
     }
 
-    // clear and rebuild boars from cached spawns (creates a NEW Group)
     clearBoars(this);
     rebuildBoarsFromSpawns(this);
 
-    // IMPORTANT:
-    // - Do NOT re-wire player overlaps/collides here (they would stack).
-    // - But boar rules/collisions must be re-attached because this.boar is a new Group.
-    this._boarFireWired = false; // boar group replaced => must re-wire overlaps to fire
+    this._boarFireWired = false;
     this._wireBoarFireRuleOnce();
 
-    this._rebindPlayerBoarCollide(); // rebind because this.boar is a NEW Group
+    this._rebindPlayerBoarCollide();
     hookBoarSolids(this);
 
     this._lastScore = this._lastHealth = this._lastMaxHealth = null;
@@ -243,30 +252,20 @@ export class Level {
   // interactions
   // -----------------------
 
-  // Player interactions should only be wired once.
-  // These callbacks remain valid across restarts because:
-  // - the player sprite is not replaced (it is reset)
-  // - the leaf sprites persist (they are toggled active/visible)
-  // - the boar Group is replaced on restart, BUT the player's collides() rule
-  //   is attached to the player sprite; we re-attach it to the new boar Group.
   _wirePlayerInteractionsOnce() {
     if (this._playerInteractionsWired) return;
     this._playerInteractionsWired = true;
 
     const p = this.playerCtrl.sprite;
 
-    // leaf collect
     p.overlaps(this.leaf, (playerSprite, leafSprite) => this._rescueLeaf(playerSprite, leafSprite));
 
-    // fire damage
     p.overlaps(this.fire, (playerSprite, fireSprite) => {
+      if (this.debugFlags.invincible) return;
       this.playerCtrl.damageFromX(fireSprite.x);
     });
   }
 
-  // Boar/fire rule is attached to the boar Group.
-  // We wire it ONCE per boar-group instance (not per Level lifetime),
-  // because the boar group is replaced on restart.
   _wireBoarFireRuleOnce() {
     if (this._boarFireWired) return;
     if (!this.boar || !this.fire) return;
@@ -281,19 +280,17 @@ export class Level {
     });
   }
 
-  // Player/boar contact damage must be attached to the CURRENT boar Group.
-  // Guard so we only bind once per boar-Group instance (prevents stacking across restarts).
   _rebindPlayerBoarCollide() {
     const p = this.playerCtrl?.sprite;
     const g = this.boar;
     if (!p || !g) return;
 
-    // If we already bound to this exact Group object, do nothing.
     if (this._boarGroupBoundForPlayer === g) return;
     this._boarGroupBoundForPlayer = g;
 
     p.collides(g, (playerSprite, boarSprite) => {
       if (boarSprite.dying || boarSprite.dead) return;
+      if (this.debugFlags.invincible) return;
       this.playerCtrl.damageFromX(boarSprite.x);
     });
   }
@@ -311,18 +308,20 @@ export class Level {
     if (this.score >= this.WIN_SCORE) {
       this.won = true;
 
-      // freeze player immediately (monolith behavior)
       playerSprite.vel.x = 0;
       playerSprite.vel.y = 0;
 
-      this.events?.emit("level:won", { score: this.score, winScore: this.WIN_SCORE, elapsedMs: this.elapsedMs });
+      this.events?.emit("level:won", {
+        score: this.score,
+        winScore: this.WIN_SCORE,
+        elapsedMs: this.elapsedMs,
+      });
     }
   }
 
-  // Hook called from "player:attackWindow"
   _tryHitBoar({ facing, x, y }) {
     if (!this.boar) return;
-    if (this.player.attackHitThisSwing) return; // optional guard
+    if (this.player.attackHitThisSwing) return;
 
     const rangeX = Number(this.tuning.player?.attackRangeX ?? 20);
     const rangeY = Number(this.tuning.player?.attackRangeY ?? 16);
@@ -335,7 +334,6 @@ export class Level {
       const dx = e.x - x;
       if (Math.sign(dx) !== facing) continue;
 
-      // NOTE: e.w may be getter-only; reading is fine.
       if (Math.abs(dx) > rangeX + (e.w ?? e.width ?? 18) / 2) continue;
 
       const boarFeetY = e.y + (e.h ?? e.height ?? 12) / 2;
@@ -343,7 +341,6 @@ export class Level {
 
       this._damageBoar(e, facing);
 
-      // latch "hit happened this swing" on the entity
       this.player.markAttackHit();
       return;
     }
@@ -363,23 +360,18 @@ export class Level {
     this.events?.emit("boar:damaged", { hp: e.hp, x: e.x, y: e.y });
 
     if (e.hp <= 0) {
-      // Match monolith: enter "dying" first, then "dead" once grounded in BoarSystem.
       e.dying = true;
       e.vel.x = 0;
 
-      // Ensure it can’t collide while dying
       e.collider = "none";
       e.removeColliders();
 
-      // In the monolith you set "throwPose" here (not "death").
-      // Actual death animation starts later inside BoarSystem when grounded.
       this._setAniFrame0Safe(e, "throwPose");
 
       this.events?.emit("boar:died", { x: e.x, y: e.y });
       return;
     }
 
-    // knockback
     e.knockTimer = knockFrames;
     e.vel.x = facingDir * knockX;
     e.vel.y = -knockY;
@@ -411,12 +403,10 @@ export class Level {
   }
 
   _fallResetIfNeeded() {
-    // Prefer levelData.tiles.tileH from levels.json; fall back to cfg / default
     const tileH = Number(this.levelData?.tiles?.tileH ?? this.tilesCfg?.tileH ?? 24);
     const p = this.playerCtrl.sprite;
     const playerDead = this.player?.dead === true;
 
-    // Match monolith: fall reset only while alive and not won.
     if (!playerDead && !this.won && p.y > this.bounds.levelH + tileH * this.FALL_RESET_MARGIN_TILES) {
       p.x = this.player.startX;
       p.y = this.player.startY;
@@ -425,9 +415,6 @@ export class Level {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // PHYSICS SANITY
-  // ---------------------------------------------------------------------------
   _preStepPhysicsSanity() {
     for (const s of allSprites) {
       if (!s) continue;
@@ -438,7 +425,6 @@ export class Level {
         continue;
       }
 
-      // NOTE: In p5play v3, w/h may be getter-only and still valid to read.
       if ("w" in s && (!Number.isFinite(s.w) || s.w <= 0)) {
         console.warn("[SANITY] removing sprite with bad width:", { w: s.w, x: s.x, y: s.y });
         s.remove?.();
@@ -461,9 +447,6 @@ export class Level {
     }
   }
 
-  // -----------------------
-  // HUD API (delegates)
-  // -----------------------
   redrawHUD() {
     redrawHUD(this);
   }

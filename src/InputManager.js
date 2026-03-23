@@ -22,6 +22,8 @@ export class InputManager {
       attack: false,
       restart: false,
       debugToggle: false,
+      moonGravityToggle: false,
+      invincibleToggle: false,
     };
 
     // canonical snapshot (same object reused every frame)
@@ -35,6 +37,8 @@ export class InputManager {
       attackPressed: false,
       restartPressed: false,
       debugTogglePressed: false,
+      moonGravityTogglePressed: false,
+      invincibleTogglePressed: false,
     };
   }
 
@@ -47,6 +51,8 @@ export class InputManager {
       this._input.attackPressed = false;
       this._input.restartPressed = false;
       this._input.debugTogglePressed = false;
+      this._input.moonGravityTogglePressed = false;
+      this._input.invincibleTogglePressed = false;
       return this._input;
     }
 
@@ -59,12 +65,13 @@ export class InputManager {
     // -----------------------
     // Down states (for edges)
     // Use kb.pressing for "is currently down", then edge-detect ourselves.
-    // (Avoid kb.presses here to keep all edge logic in one place.)
     // -----------------------
     const jumpDown = kb.pressing("w") || kb.pressing("up");
     const attackDown = kb.pressing("space");
     const restartDown = kb.pressing("r");
     const debugToggleDown = kb.pressing("t");
+    const moonGravityToggleDown = kb.pressing("1");
+    const invincibleToggleDown = kb.pressing("2");
 
     // -----------------------
     // Write snapshot
@@ -75,7 +82,12 @@ export class InputManager {
     this._input.jumpPressed = jumpDown && !this._prevDown.jump;
     this._input.attackPressed = attackDown && !this._prevDown.attack;
     this._input.restartPressed = restartDown && !this._prevDown.restart;
-    this._input.debugTogglePressed = debugToggleDown && !this._prevDown.debugToggle;
+    this._input.debugTogglePressed =
+      debugToggleDown && !this._prevDown.debugToggle;
+    this._input.moonGravityTogglePressed =
+      moonGravityToggleDown && !this._prevDown.moonGravityToggle;
+    this._input.invincibleTogglePressed =
+      invincibleToggleDown && !this._prevDown.invincibleToggle;
 
     // -----------------------
     // Store prev DOWN states
@@ -84,11 +96,12 @@ export class InputManager {
     this._prevDown.attack = attackDown;
     this._prevDown.restart = restartDown;
     this._prevDown.debugToggle = debugToggleDown;
+    this._prevDown.moonGravityToggle = moonGravityToggleDown;
+    this._prevDown.invincibleToggle = invincibleToggleDown;
 
     return this._input;
   }
 
-  // Game.js expects: inputSnap = this.input.input;
   get input() {
     return this._input;
   }
